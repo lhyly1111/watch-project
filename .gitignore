@@ -1,0 +1,39 @@
+# STM32CubeIDE build outputs
+Debug/
+Release/
+build/
+
+# STM32CubeIDE / Eclipse local workspace metadata
+.settings/
+.mxproject
+
+# CubeMX-generated backup and temporary files
+*.bak
+*.tmp
+*.swp
+*.swo
+*.orig
+
+# Compiler, linker, and debugger artifacts
+*.o
+*.obj
+*.a
+*.d
+*.elf
+*.axf
+*.map
+*.list
+*.lst
+*.hex
+*.bin
+*.dmp
+
+# IDE and OS files
+.vscode/
+.idea/
+*.user
+*.launch
+.DS_Store
+Thumbs.db
+
+# Keep source, generated CubeMX configuration, linker scripts, and FreeRTOS files tracked.
