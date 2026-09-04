@@ -36,7 +36,13 @@ build/
 .DS_Store
 Thumbs.db
 
-# Separate STM32C8T6 RTOS learning project. It is outside the OV-Watch work scope.
+# Separate STM32F411 RTOS learning project. It is outside the OV-Watch work scope.
 RTOS/
+
+# Immutable OV-Watch V2.4.3 reference snapshot. The study report at the project root remains tracked.
+项目源码/BootLoader_F411.hex
+项目源码/OV_Watch_V2_4_3.bin
+项目源码/OV-Watch-2.4.3.zip
+项目源码/OV-Watch-2.4.3/
 
 # Keep source, generated CubeMX configuration, linker scripts, and FreeRTOS files tracked.
