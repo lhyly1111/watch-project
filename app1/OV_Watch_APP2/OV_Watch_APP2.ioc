@@ -2,8 +2,10 @@
 ADC1.Channel-0\#ChannelRegularConversion=ADC_CHANNEL_1
 ADC1.ClockPrescaler=ADC_CLOCK_SYNC_PCLK_DIV8
 ADC1.EnableAnalogWatchDog=false
-ADC1.IPParameters=master,NbrOfConversionFlag,Channel-0\#ChannelRegularConversion,ClockPrescaler,EnableAnalogWatchDog
+ADC1.IPParameters=master,NbrOfConversionFlag,Channel-0\#ChannelRegularConversion,ClockPrescaler,EnableAnalogWatchDog,NbrOfConversion,SamplingTime-0\#ChannelRegularConversion
+ADC1.NbrOfConversion=1
 ADC1.NbrOfConversionFlag=1
+ADC1.SamplingTime-0\#ChannelRegularConversion=ADC_SAMPLETIME_480CYCLES
 ADC1.master=1
 CAD.formats=
 CAD.pinconfig=
