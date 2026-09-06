@@ -46,3 +46,8 @@ RTOS/
 项目源码/OV-Watch-2.4.3/
 
 # Keep source, generated CubeMX configuration, linker scripts, and FreeRTOS files tracked.
+
+# APP2 is the active STM32F411CEU6 CMake project. Keep only its CMake build path;
+# the MDK output and the earlier incorrect-MCU generation are retained locally for reference.
+app1/OV_Watch_APP2/MDK-ARM/
+app1/OV_Watch_app1/
