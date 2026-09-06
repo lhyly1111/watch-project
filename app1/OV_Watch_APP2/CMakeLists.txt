@@ -48,6 +48,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
         BSP/Backlight/bsp_backlight.c
         BSP/Battery/bsp_battery.c
+        BSP/Key/bsp_key.c
 )
 
 # Add include paths
@@ -55,6 +56,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
         BSP/Backlight
         BSP/Battery
+        BSP/Key
 )
 
 # Add project symbols (macros)

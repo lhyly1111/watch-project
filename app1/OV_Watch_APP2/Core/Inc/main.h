@@ -57,6 +57,10 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define WAKE_Pin GPIO_PIN_4
+#define WAKE_GPIO_Port GPIOA
+#define KEY1_Pin GPIO_PIN_5
+#define KEY1_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 

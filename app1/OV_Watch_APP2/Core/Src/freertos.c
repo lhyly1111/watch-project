@@ -25,6 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bsp_key.h"
 
 /* USER CODE END Includes */
 
@@ -45,6 +46,8 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+volatile bool key1_pressed;
+volatile bool wake_key_pressed;
 
 /* USER CODE END Variables */
 /* Definitions for defaultTask */
@@ -117,7 +120,9 @@ void StartDefaultTask(void *argument)
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    key1_pressed = Key1_IsPressed();
+    wake_key_pressed = WakeKey_IsPressed();
+    osDelay(10);
   }
   /* USER CODE END StartDefaultTask */
 }
