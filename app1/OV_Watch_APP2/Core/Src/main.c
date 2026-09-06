@@ -20,12 +20,14 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "adc.h"
+#include "spi.h"
 #include "tim.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bsp_backlight.h"
+#include "bsp_battery.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,7 +48,8 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+volatile uint16_t battery_raw;
+volatile float battery_voltage;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -92,9 +95,11 @@ int main(void)
   MX_GPIO_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-
   Backlight_Init();
+  battery_raw = Battery_ReadRaw();
+  battery_voltage = Battery_ReadVoltageAverage();
   /* USER CODE END 2 */
 
   /* Init scheduler */
