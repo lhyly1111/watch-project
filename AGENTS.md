@@ -15,7 +15,7 @@ When an APP2 hardware feature compiles and downloads but does not behave on the 
 
 ## APP2 development roadmap
 
-The high-level development roadmap is `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\开发路线\OV Watch APP2 开发目录.md`. Keep it high-level. Before starting a roadmap stage, create or extend that stage's linked Obsidian note with the detailed implementation and learning plan; after completion, update the roadmap status, verification evidence, and the next stage. Do not advance to a dependent stage until its stated acceptance condition is met.
+For every OV-Watch question or APP2 change, first read `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\开发路线\项目学习报告与事实基线.md`, then the high-level roadmap `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\开发路线\OV Watch APP2 开发目录.md`, and the relevant detailed stage note under `开发路线\阶段详解`; also read the current source, `.ioc`, schematic, or reference needed for the question. Keep the high-level roadmap high-level. Before starting a roadmap stage, create or extend that stage's linked Obsidian note with the detailed implementation and learning plan; after completion, update that note with verification evidence, risks and the next action, then update roadmap status if it changed. Do not advance to a dependent stage until its stated acceptance condition is met. The old `C:\Users\Administrator\Desktop\手表项目\OV-Watch-学习对话记录.md` is historical only and must not receive new entries.
 
 ## Daily Obsidian learning notes
 
