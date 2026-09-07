@@ -153,6 +153,12 @@ See http://www.FreeRTOS.org/RTOS-Cortex-M3-M4.html. */
 header file. */
 /* USER CODE BEGIN 1 */
 #define configASSERT( x ) if ((x) == 0) {taskDISABLE_INTERRUPTS(); for( ;; );}
+/*
+ * 在每次任务切换时用 FreeRTOS 的两种栈边界检查方式验证任务栈。值 2 会额外检查栈底填充值，
+ * 能把多数向下增长的栈越界收敛到 vApplicationStackOverflowHook()，而不是任由其破坏其他 TCB。
+ * 它只检测切换时已发生的越界，不替代为每个任务分配并实测足够的栈空间。
+ */
+#define configCHECK_FOR_STACK_OVERFLOW 2
 /* USER CODE END 1 */
 
 /* Definitions that map the FreeRTOS port interrupt handlers to their CMSIS
