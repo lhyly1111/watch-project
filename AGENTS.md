@@ -9,6 +9,8 @@
 
 `RTOS` remains a separate STM32F411 Keil + MDK learning project. Do not inspect or modify it unless the user explicitly requests RTOS work.
 
-## Daily GitHub learning snapshot
+## Daily Obsidian learning notes
 
-The active implementation is `app1/OV_Watch_APP2`. When the user asks for a daily OV-Watch learning summary, include that day's verified APP2 code and configuration in a dedicated Git commit, append the day's summary, verification state, unresolved risks, and next action to the repository root `README.md`, and push the commit to `https://github.com/lhyly1111/watch-project.git`. Exclude build outputs, IDE metadata, `tmp/`, the `RTOS/` learning project, and the immutable `项目源码/` reference snapshot.
+The active implementation is `app1/OV_Watch_APP2`. When the user asks for a daily OV-Watch learning summary, create or update a dated Markdown note in `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\每日总结` and update the relevant relation chain in `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\关系链`. Each note must distinguish verified results, unresolved risks, and the next action, and should link to its relation chain and relevant protocol notes.
+
+Do not append daily learning summaries to this repository's `README.md`, and do not upload the Obsidian daily notes to GitHub. GitHub is reserved for APP2 code and configuration changes that the user asks to commit and push. Exclude build outputs, IDE metadata, `tmp/`, the `RTOS/` learning project, and the immutable `项目源码/` reference snapshot.
