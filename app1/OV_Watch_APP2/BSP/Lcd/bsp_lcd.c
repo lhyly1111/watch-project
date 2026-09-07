@@ -26,13 +26,22 @@
      */
     static void Lcd_WriteCommand(uint8_t command)
     {
+        /* HAL_GPIO_WritePin(端口, 引脚, 电平)：将 CS 拉低，选中 LCD，后续 SPI 字节才会被面板接收。 */
         HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_RESET);
+        /* 将 DC 拉低，告诉 ST7789 下一个 SPI 字节是“命令”而非参数或像素数据。 */
         HAL_GPIO_WritePin(LCD_DC_GPIO_Port, LCD_DC_Pin, GPIO_PIN_RESET);
 
+        /*
+         * HAL_SPI_Transmit(SPI 句柄, 发送缓冲区, 字节数, 超时毫秒数) 是 HAL 的阻塞式发送函数。
+         * &hspi1 指向 CubeMX 初始化的 SPI1；&command 指向本次唯一的命令字节；1U 表示只发 1 字节；
+         * 100U 是最长等待 100 ms。函数返回 HAL_OK 才说明 MCU 侧 SPI 发送完成，不代表面板一定显示正确。
+         */
         if (HAL_SPI_Transmit(&hspi1, &command, 1U, 100U) != HAL_OK) {
+            /* Error_Handler() 是 CubeMX 项目的故障终止入口；当前实现会关中断并停在死循环，防止继续发送失序数据。 */
             Error_Handler();
         }
 
+        /* 将 CS 拉高，取消本次命令事务；下一次命令或数据会重新选中 LCD。 */
         HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_SET);
     }
 
@@ -43,13 +52,22 @@
      */
     static void Lcd_WriteData(const uint8_t *data, uint16_t size)
     {
+        /* 选中 LCD，保证 data 指向的字节会送到面板而不是被 SPI 总线忽略。 */
         HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_RESET);
+        /* DC 拉高，告诉 ST7789 后续字节是当前命令的参数，或 0x2C 后的 RGB565 像素数据。 */
         HAL_GPIO_WritePin(LCD_DC_GPIO_Port, LCD_DC_Pin, GPIO_PIN_SET);
 
+        /*
+         * 将 data 指向的 size 个字节经 hspi1 阻塞发出，最长等待 100 ms。
+         * 这里 size 是字节数：例如 256 个 RGB565 像素需要传入 512，而不是 256。
+         * 发送完成后才能复用调用者的缓冲区，这也是当前阻塞实现比 DMA 简单的原因。
+         */
         if (HAL_SPI_Transmit(&hspi1, (uint8_t *)data, size, 100U) != HAL_OK) {
+            /* SPI 外设超时或错误后停止程序；否则上层会错误地认为整块像素已写入。 */
             Error_Handler();
         }
 
+        /* 数据事务结束后释放 CS；地址窗口保持在 ST7789 内部，下一块数据仍会写入同一窗口的后续位置。 */
         HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_SET);
     }
 
@@ -59,9 +77,13 @@
     */
     static void Lcd_Reset(void)
     {
+        /* 将 RST 拉低，硬件复位 ST7789，清除之前上电或上次运行留下的内部状态。 */
         HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_RESET);
+        /* HAL_Delay(100U) 以 HAL 系统 tick 为单位阻塞 100 ms，满足面板复位低电平保持时间。 */
         HAL_Delay(100U);
+        /* 将 RST 拉高，允许控制器从复位状态重新启动。 */
         HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_SET);
+        /* 再等待 120 ms，给面板内部电源和状态机完成启动；此时不能提前发送初始化命令。 */
         HAL_Delay(120U);
     }
     /*
@@ -278,6 +300,7 @@
 
             /* 0x11 退出睡眠后，控制器要求至少等待 120 ms。 */
             Lcd_WriteCommand(0x11U);
+            /* HAL_Delay 使用启动阶段已经可用的 HAL tick；此时调度器未运行，不能改用 osDelay。 */
             HAL_Delay(120U);
 
             /* 将上方每个配置数组按对应命令写入；数组名表达“参数是什么”，命令号表达“写到哪个寄存器”。 */
