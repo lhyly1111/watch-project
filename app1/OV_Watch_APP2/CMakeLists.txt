@@ -55,6 +55,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
         BSP/Battery/bsp_battery.c
         BSP/Key/bsp_key.c
         BSP/Lcd/bsp_lcd.c
+        # 最小验证页面属于 APP2 应用层；CubeMX 生成子目录不会自动发现此后新增的 Core/Src 文件，故在此显式列出。
+        Core/Src/app_lvgl_demo.c
+        # BSP/Lvgl 是 APP2 自己的 LVGL 显示端口，不属于第三方 LVGL 源码。
+        BSP/Lvgl/lv_port_disp.c
         ${LVGL_SOURCES}
 )
 
@@ -65,6 +69,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
         BSP/Battery
         BSP/Key
         BSP/Lcd
+        BSP/Lvgl
         # lv_conf.h 位于该目录；LV_CONF_INCLUDE_SIMPLE 让 LVGL 从这里找到 APP2 的独立配置。
         Middlewares/LVGL
         # lvgl.h 位于该目录，APP2 之后的显示端口只需 #include "lvgl.h"。
