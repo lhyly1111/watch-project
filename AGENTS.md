@@ -9,6 +9,10 @@
 
 `RTOS` remains a separate STM32F411 Keil + MDK learning project. Do not inspect or modify it unless the user explicitly requests RTOS work.
 
+## APP2 hardware diagnosis
+
+When an APP2 hardware feature compiles and downloads but does not behave on the board, first confirm execution with a breakpoint or debugger state. Then compare the relevant APP2 CubeMX `.ioc`, generated `main.h`/GPIO/SPI configuration, and the immutable V2.4.3 reference driver. List the concrete differences and change only one hardware or protocol variable per test. Treat successful board behavior as the final evidence, and record the configuration that produced it.
+
 ## Daily Obsidian learning notes
 
 The active implementation is `app1/OV_Watch_APP2`. When the user asks for a daily OV-Watch learning summary, create or update a dated Markdown note in `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\每日总结` and update the relevant relation chain in `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\关系链`. Each note must distinguish verified results, unresolved risks, and the next action, and should link to its relation chain and relevant protocol notes.
