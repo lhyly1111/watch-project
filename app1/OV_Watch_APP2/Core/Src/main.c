@@ -38,10 +38,13 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-/* 本次像素块写入测试图案的尺寸和显示位置。 */
+/* 测试图案的横向像素数量；它决定每一行在 lcd_pixel_test_buffer 中包含多少个颜色值。 */
 #define LCD_PIXEL_TEST_WIDTH   96U
+/* 测试图案的纵向像素数量；与宽度相乘得到总像素数和测试缓冲区容量。 */
 #define LCD_PIXEL_TEST_HEIGHT  60U
+/* 测试图案左上角的逻辑列坐标；24 让图案离屏幕左边缘留出黑色背景便于定位。 */
 #define LCD_PIXEL_TEST_X       24U
+/* 测试图案左上角的逻辑行坐标；40 让图案离屏幕上边缘留出黑色背景便于定位。 */
 #define LCD_PIXEL_TEST_Y       40U
 
 /* USER CODE END PD */
@@ -54,7 +57,9 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+/* battery_raw 保存 ADC1 最近一次原始转换值，单位是 ADC 计数；volatile 防止编译器缓存被硬件更新的数据。 */
 volatile uint16_t battery_raw;
+/* battery_voltage 保存由原始 ADC 值换算出的电池电压，单位为 V，供后续电池状态页面使用。 */
 volatile float battery_voltage;
 /*
  * 本次测试图案的像素存储区：96 x 60 个 uint16_t，每个元素存一个 RGB565 颜色，
@@ -80,27 +85,34 @@ void MX_FREERTOS_Init(void);
  */
 static void Lcd_BuildPixelTestPattern(void)
 {
+  /* y 是正在生成的图案行号，范围为 0 到 59；外层循环每执行一次就完成一整行。 */
   for (uint16_t y = 0U; y < LCD_PIXEL_TEST_HEIGHT; ++y)
   {
+    /* x 是当前行内的列号，范围为 0 到 95；内层循环决定该位置最终写入哪种颜色。 */
     for (uint16_t x = 0U; x < LCD_PIXEL_TEST_WIDTH; ++x)
     {
-      uint16_t color = 0x0000U;  // 默认黑色背景
+      /* color 是当前 (x, y) 像素的 RGB565 颜色；先设为黑色，再由条件覆盖为测试色块。 */
+      uint16_t color = 0x0000U;
 
+      /* y < 10 表示图案最上方 10 行，用红色建立容易识别的顶部方向标记。 */
       if (y < 10U)
       {
-        color = 0xF800U;  // 顶部红条
+        color = 0xF800U;
       }
-      else if (x < 16U)
+      /* x < 20 表示红条以下的最左侧 20 列，用绿色建立左侧方向标记。 */
+      else if (x < 20U)
       {
-        color = 0x07E0U;  // 左侧绿条
+        color = 0x07E0U;
       }
+      /* x/y 范围限定右侧中部蓝块；它不与左条或顶条对称，便于发现翻转。 */
       else if ((x >= 64U) && (y >= 20U) && (y < 40U))
       {
-        color = 0x001FU;  // 右中蓝块
+        color = 0x001FU;
       }
+      /* x/y 范围限定下方中部白块；与蓝块一起提供第二个方向参考。 */
       else if ((x >= 32U) && (x < 48U) && (y >= 40U))
       {
-        color = 0xFFFFU;  // 下中白块
+        color = 0xFFFFU;
       }
 
       /* C 数组按行优先存放：先写完一行，再进入下一行。 */
