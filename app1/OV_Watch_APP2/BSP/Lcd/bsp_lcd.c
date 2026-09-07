@@ -2,19 +2,25 @@
     #include "bsp_lcd.h"
 
     #include <stdbool.h>
-#include <stddef.h>
+    #include <stddef.h>
 
     #include "main.h"
     #include "spi.h"
 
-    /* 逻辑显示区域；控制器显存的 Y 偏移将在填屏阶段单独处理。 */
+    /* APP2 对上层公开的可见逻辑宽度，单位为像素；x 坐标合法范围是 0 到 239。 */
     #define LCD_WIDTH  240U
+    /* APP2 对上层公开的可见逻辑高度，单位为像素；y 坐标合法范围是 0 到 279。 */
     #define LCD_HEIGHT 280U
+    /* 逻辑 x 坐标到 ST7789 显存列坐标的偏移；当前面板列坐标无需补偿，故为 0。 */
     #define LCD_X_OFFSET 0U
+    /* 逻辑 y 坐标到 ST7789 显存行坐标的偏移；当前 240 x 280 可视区从控制器第 20 行开始。 */
     #define LCD_Y_OFFSET 20U
+    /* 每次 SPI 阻塞发送最多复用的像素数量；256 像素等于 512 字节，避免大栈缓冲区和单次超长传输。 */
     #define LCD_FILL_CHUNK_PIXELS 256U
 
-    /* CS 选中 LCD，DC=0 使控制器把 SPI 字节解释为命令。
+    /*
+       command：要执行的单字节 ST7789 命令，例如 0x2A（列地址）或 0x29（开显示）。
+       CS 选中 LCD，DC=0 使控制器把 SPI 字节解释为命令。
        命令：CS=0 -> DC=0 -> SPI 发命令字节 -> CS=1
        数据：CS=0 -> DC=1 -> SPI 发参数/像素字节 -> CS=1
      */
@@ -30,7 +36,11 @@
         HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_SET);
     }
 
-    /* DC=1 表示命令参数或像素数据；SPI 传输失败后停在 Error_Handler。 */
+    /*
+     * data：待发送字节流的起始地址，可以指向命令参数或 RGB565 像素数据。
+     * size：从 data 开始要发送的字节数，不是 RGB565 像素数；一个像素通常对应两个字节。
+     * DC=1 表示命令参数或像素数据；SPI 传输失败后停在 Error_Handler，避免程序带着不完整画面继续运行。
+     */
     static void Lcd_WriteData(const uint8_t *data, uint16_t size)
     {
         HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_RESET);
@@ -54,7 +64,12 @@
         HAL_GPIO_WritePin(LCD_RST_GPIO_Port, LCD_RST_Pin, GPIO_PIN_SET);
         HAL_Delay(120U);
     }
-    /* ST7789 的常见帧格式：一条命令，后跟零个或多个参数字节。 */
+    /*
+     * command：本帧先发送的 ST7789 命令字节。
+     * data：紧随该命令的参数首地址；当 size 为 0 时不会读取它。
+     * size：参数字节数。例如 0x2A 和 0x2B 的参数长度都是 4，0x11 没有参数。
+     * 该函数把“先命令、后数据”的固定协议顺序封装起来，调用者不用重复设置 DC。
+     */
     static void Lcd_WriteCommandWithData(uint8_t command,
                                          const uint8_t *data,
                                          uint16_t size)
@@ -66,22 +81,30 @@
             }
         }
 
+    /*
+     * 将逻辑矩形的左上/右下坐标转换为 ST7789 的列地址、行地址后启动 RAM 写入。
+     * x_start/y_start 是包含在窗口内的起点；x_end/y_end 是同样包含在窗口内的终点，
+     * 因此调用者必须先保证终点没有越界。0x2A 设置列、0x2B 设置行、0x2C 让后续数据变为像素流。
+     */
     static void Lcd_SetAddressWindow(uint16_t x_start,
                                      uint16_t y_start,
                                      uint16_t x_end,
                                      uint16_t y_end)
         {
+            /* controller_* 保存加过面板显存偏移后的实际 ST7789 坐标，不再是 APP2 的逻辑坐标。 */
             const uint16_t controller_x_start = x_start + LCD_X_OFFSET;
             const uint16_t controller_x_end = x_end + LCD_X_OFFSET;
             const uint16_t controller_y_start = y_start + LCD_Y_OFFSET;
             const uint16_t controller_y_end = y_end + LCD_Y_OFFSET;
 
+            /* column_data 是 0x2A 的四个参数：起始列高/低字节、结束列高/低字节。 */
             const uint8_t column_data[] = {
                 (uint8_t)(controller_x_start >> 8U),
                 (uint8_t)controller_x_start,
                 (uint8_t)(controller_x_end >> 8U),
                 (uint8_t)controller_x_end
             };
+            /* row_data 是 0x2B 的四个参数：起始行高/低字节、结束行高/低字节。 */
             const uint8_t row_data[] = {
                 (uint8_t)(controller_y_start >> 8U),
                 (uint8_t)controller_y_start,
@@ -89,8 +112,11 @@
                 (uint8_t)controller_y_end
             };
 
+            /* 0x2A 接收 column_data，确定本次像素流可自动递增的列范围。 */
             Lcd_WriteCommandWithData(0x2AU, column_data, sizeof(column_data));
+            /* 0x2B 接收 row_data，确定本次像素流可自动递增的行范围。 */
             Lcd_WriteCommandWithData(0x2BU, row_data, sizeof(row_data));
+            /* 0x2C 不带参数；从这一刻开始 Lcd_WriteData() 的字节会写入刚设置的显存窗口。 */
             Lcd_WriteCommand(0x2CU);
         }
 
@@ -116,8 +142,11 @@
          * 使用静态小缓冲区而不是按整个矩形分配：整屏需要 134400 字节，
          * 超出栈空间；这里反复发送同一块 256 像素的颜色数据即可。
          */
+        /* pixel_buffer 保存一段重复颜色的 SPI 字节流；每个 RGB565 像素占两个字节。 */
         static uint8_t pixel_buffer[LCD_FILL_CHUNK_PIXELS * 2U];
+        /* remaining_pixels 是当前矩形尚未写入的像素数，不是字节数，故使用 uint32_t 防止面积计算溢出。 */
         uint32_t remaining_pixels;
+        /* pixel_count 是本轮实际发送的像素数，最大为 256；发送字节数等于它乘以 2。 */
         uint16_t pixel_count;
 
         if (!Lcd_IsRectValid(x, y, width, height)) {
@@ -125,6 +154,7 @@
         }
 
         /* ST7789 要求 RGB565 高字节先通过 SPI 发出。 */
+        /* index 是当前重复颜色块中的像素下标，范围为 0 到 255。 */
         for (uint16_t index = 0U; index < LCD_FILL_CHUNK_PIXELS; ++index) {
             pixel_buffer[index * 2U] = (uint8_t)(color >> 8U);
             pixel_buffer[index * 2U + 1U] = (uint8_t)color;
@@ -142,6 +172,7 @@
             }
 
             Lcd_WriteData(pixel_buffer, pixel_count * 2U);
+            /* 本轮已发送 pixel_count 个像素；减法后 while 条件决定是否需要发送下一块。 */
             remaining_pixels -= pixel_count;
         }
     }
@@ -155,9 +186,13 @@
          * 0x00、0xF8；ST7789 却要求 SPI 先收到 0xF8、再收到 0x00。
          * 因此不能把 uint16_t 数组直接强制转换为 uint8_t 指针后发送。
          */
+        /* transfer_buffer 是本轮 SPI 字节流；它把原始 uint16_t 像素转换为高字节在前的格式。 */
         static uint8_t transfer_buffer[LCD_FILL_CHUNK_PIXELS * 2U];
+        /* current_pixel 指向本轮尚未转换的第一个 RGB565 像素；每轮发送后向前移动 pixel_count 个元素。 */
         const uint16_t *current_pixel = pixels;
+        /* remaining_pixels 记录窗口中还没写入 LCD 的像素数量，初值为 width 乘以 height。 */
         uint32_t remaining_pixels;
+        /* pixel_count 记录本轮要转换和发送的像素数，限制为 256 以匹配 transfer_buffer 容量。 */
         uint16_t pixel_count;
 
         if ((pixels == NULL) || !Lcd_IsRectValid(x, y, width, height)) {
@@ -175,7 +210,9 @@
             }
 
             /* 每次把一段像素转换为 LCD 所需的高字节在前格式。 */
+            /* index 是本传输块内的像素下标；current_pixel[index] 仍是 MCU 内存中的 uint16_t 颜色值。 */
             for (uint16_t index = 0U; index < pixel_count; ++index) {
+                /* color 是当前待转换的 RGB565 值；它在下一行被拆成高字节和低字节。 */
                 const uint16_t color = current_pixel[index];
 
                 transfer_buffer[index * 2U] = (uint8_t)(color >> 8U);
@@ -183,6 +220,7 @@
             }
 
             Lcd_WriteData(transfer_buffer, pixel_count * 2U);
+            /* 指针按像素元素前进，remaining_pixels 按像素数量递减；两者始终保持同一进度。 */
             current_pixel += pixel_count;
             remaining_pixels -= pixel_count;
         }
@@ -201,37 +239,48 @@
        */
     void Lcd_Init(void)
         {
-            /* 0x36 控制扫描方向；0x00 是参考工程的竖屏配置。 */
+            /* madctl 是 0x36 扫描方向寄存器的参数；0x00 保持当前已实测成功的竖屏方向。 */
             static const uint8_t madctl[] = {0x00U};
-            /* 0x3A 的 0x05 选择 RGB565，每个像素占 16 bit。 */
+            /* colmod 是 0x3A 像素格式寄存器的参数；0x05 选择 RGB565，使一个像素固定占 16 bit。 */
             static const uint8_t colmod[] = {0x05U};
 
-            /* B2-D0 是显示时序、电源与电压参数，先保持参考值。 */
+            /* b2 是 0xB2 前后肩时序参数；保持参考值，避免改变液晶行扫描时序。 */
             static const uint8_t b2[] = {0x0CU, 0x0CU, 0x00U, 0x33U, 0x33U};
+            /* b7 是 0xB7 栅极控制参数，影响面板行驱动方式。 */
             static const uint8_t b7[] = {0x35U};
+            /* bb 是 0xBB VCOM 电压参数，影响液晶对比度与稳定性。 */
             static const uint8_t bb[] = {0x19U};
+            /* c0 是 0xC0 LCM 控制参数，描述面板驱动模式。 */
             static const uint8_t c0[] = {0x2CU};
+            /* c2 是 0xC2 电压寄存器使能参数，必须先于 VRH/VDV 设置写入。 */
             static const uint8_t c2[] = {0x01U};
+            /* c3 是 0xC3 VRH 电压参数，影响内部参考高电压。 */
             static const uint8_t c3[] = {0x12U};
+            /* c4 是 0xC4 VDV 电压参数，配合 VRH 设置驱动电压。 */
             static const uint8_t c4[] = {0x20U};
+            /* c6 是 0xC6 帧率参数，决定面板刷新时序。 */
             static const uint8_t c6[] = {0x0FU};
+            /* d0 是 0xD0 电源控制参数，配置内部升压与供电行为。 */
             static const uint8_t d0[] = {0xA4U, 0xA1U};
-            /* E0/E1 是正、负 Gamma 曲线，不是将要写入屏幕的颜色数据。 */
+            /* e0 是 0xE0 正 Gamma 曲线参数，描述较亮灰阶的亮度响应；它不是待显示的像素数据。 */
             static const uint8_t e0[] = {
                 0xD0U, 0x04U, 0x0DU, 0x11U, 0x13U, 0x2BU, 0x3FU,
                 0x54U, 0x4CU, 0x18U, 0x0DU, 0x0BU, 0x1FU, 0x23U
             };
+            /* e1 是 0xE1 负 Gamma 曲线参数，补偿另一方向的灰阶响应；需与 e0 一起保持参考值。 */
             static const uint8_t e1[] = {
                 0xD0U, 0x04U, 0x0CU, 0x11U, 0x13U, 0x2CU, 0x3FU,
                 0x44U, 0x51U, 0x2FU, 0x1FU, 0x1FU, 0x20U, 0x23U
             };
 
+            /* 先硬件复位，保证下面所有寄存器配置从已知面板状态开始。 */
             Lcd_Reset();
 
             /* 0x11 退出睡眠后，控制器要求至少等待 120 ms。 */
             Lcd_WriteCommand(0x11U);
             HAL_Delay(120U);
 
+            /* 将上方每个配置数组按对应命令写入；数组名表达“参数是什么”，命令号表达“写到哪个寄存器”。 */
             Lcd_WriteCommandWithData(0x36U, madctl, sizeof(madctl));
             Lcd_WriteCommandWithData(0x3AU, colmod, sizeof(colmod));
             Lcd_WriteCommandWithData(0xB2U, b2, sizeof(b2));
