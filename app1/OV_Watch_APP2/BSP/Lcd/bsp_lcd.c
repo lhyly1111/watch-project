@@ -2,6 +2,7 @@
     #include "bsp_lcd.h"
 
     #include <stdbool.h>
+#include <stddef.h>
 
     #include "main.h"
     #include "spi.h"
@@ -143,6 +144,50 @@
             Lcd_WriteData(pixel_buffer, pixel_count * 2U);
             remaining_pixels -= pixel_count;
         }
+    }
+
+    bool Lcd_WritePixels(uint16_t x, uint16_t y,
+                         uint16_t width, uint16_t height,
+                         const uint16_t *pixels)
+    {
+        /*
+         * STM32F4 以小端方式存放 uint16_t：例如红色 0xF800 在内存中是
+         * 0x00、0xF8；ST7789 却要求 SPI 先收到 0xF8、再收到 0x00。
+         * 因此不能把 uint16_t 数组直接强制转换为 uint8_t 指针后发送。
+         */
+        static uint8_t transfer_buffer[LCD_FILL_CHUNK_PIXELS * 2U];
+        const uint16_t *current_pixel = pixels;
+        uint32_t remaining_pixels;
+        uint16_t pixel_count;
+
+        if ((pixels == NULL) || !Lcd_IsRectValid(x, y, width, height)) {
+            return false;
+        }
+
+        Lcd_SetAddressWindow(x, y, x + width - 1U, y + height - 1U);
+        remaining_pixels = (uint32_t)width * height;
+
+        while (remaining_pixels > 0U) {
+            if (remaining_pixels > LCD_FILL_CHUNK_PIXELS) {
+                pixel_count = LCD_FILL_CHUNK_PIXELS;
+            } else {
+                pixel_count = (uint16_t)remaining_pixels;
+            }
+
+            /* 每次把一段像素转换为 LCD 所需的高字节在前格式。 */
+            for (uint16_t index = 0U; index < pixel_count; ++index) {
+                const uint16_t color = current_pixel[index];
+
+                transfer_buffer[index * 2U] = (uint8_t)(color >> 8U);
+                transfer_buffer[index * 2U + 1U] = (uint8_t)color;
+            }
+
+            Lcd_WriteData(transfer_buffer, pixel_count * 2U);
+            current_pixel += pixel_count;
+            remaining_pixels -= pixel_count;
+        }
+
+        return true;
     }
 
     void Lcd_FillScreen(uint16_t color)

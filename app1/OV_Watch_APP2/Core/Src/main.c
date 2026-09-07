@@ -38,6 +38,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/* 本次像素块写入测试图案的尺寸和显示位置。 */
+#define LCD_PIXEL_TEST_WIDTH   96U
+#define LCD_PIXEL_TEST_HEIGHT  60U
+#define LCD_PIXEL_TEST_X       24U
+#define LCD_PIXEL_TEST_Y       40U
 
 /* USER CODE END PD */
 
@@ -51,6 +56,8 @@
 /* USER CODE BEGIN PV */
 volatile uint16_t battery_raw;
 volatile float battery_voltage;
+/* 静态数组位于全局数据区，不占用 main() 的栈空间。 */
+static uint16_t lcd_pixel_test_buffer[LCD_PIXEL_TEST_WIDTH * LCD_PIXEL_TEST_HEIGHT];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,6 +69,40 @@ void MX_FREERTOS_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+/*
+ * 构造不对称图案：红色顶条、绿色左条、蓝色右中块、白色下中块。
+ * 不对称形状能同时暴露行列颠倒、上下翻转和左右翻转等问题。
+ */
+static void Lcd_BuildPixelTestPattern(void)
+{
+  for (uint16_t y = 0U; y < LCD_PIXEL_TEST_HEIGHT; ++y)
+  {
+    for (uint16_t x = 0U; x < LCD_PIXEL_TEST_WIDTH; ++x)
+    {
+      uint16_t color = 0x0000U;  // 默认黑色背景
+
+      if (y < 10U)
+      {
+        color = 0xF800U;  // 顶部红条
+      }
+      else if (x < 16U)
+      {
+        color = 0x07E0U;  // 左侧绿条
+      }
+      else if ((x >= 64U) && (y >= 20U) && (y < 40U))
+      {
+        color = 0x001FU;  // 右中蓝块
+      }
+      else if ((x >= 32U) && (x < 48U) && (y >= 40U))
+      {
+        color = 0xFFFFU;  // 下中白块
+      }
+
+      /* C 数组按行优先存放：先写完一行，再进入下一行。 */
+      lcd_pixel_test_buffer[y * LCD_PIXEL_TEST_WIDTH + x] = color;
+    }
+  }
+}
 
 /* USER CODE END 0 */
 
@@ -103,13 +144,17 @@ int main(void)
   battery_voltage = Battery_ReadVoltageAverage();
   Lcd_Init();
   /*
-   * LCD 驱动 V1 的第一项实物测试：四个矩形恰好覆盖 240 x 280 全屏。
-   * 这会同时验证 x/y 坐标、宽高计算、窗口切换和 RGB565 颜色传输。
+   * LCD 驱动 V1 的第二项实物测试：先清黑屏，再写入一块不对称像素图案。
+   * 这会验证 uint16_t 像素数组的字节序、行优先顺序和显示位置。
    */
-  Lcd_FillRect(0U,   0U,   120U, 140U, 0xF800U);  // 左上：红
-  Lcd_FillRect(120U, 0U,   120U, 140U, 0x07E0U);  // 右上：绿
-  Lcd_FillRect(0U,   140U, 120U, 140U, 0x001FU);  // 左下：蓝
-  Lcd_FillRect(120U, 140U, 120U, 140U, 0xFFFFU);  // 右下：白
+  Lcd_FillScreen(0x0000U);
+  Lcd_BuildPixelTestPattern();
+  if (!Lcd_WritePixels(LCD_PIXEL_TEST_X, LCD_PIXEL_TEST_Y,
+                       LCD_PIXEL_TEST_WIDTH, LCD_PIXEL_TEST_HEIGHT,
+                       lcd_pixel_test_buffer))
+  {
+    Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Init scheduler */
