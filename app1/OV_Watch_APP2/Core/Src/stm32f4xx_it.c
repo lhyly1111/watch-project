@@ -55,6 +55,7 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern DMA_HandleTypeDef hdma_spi1_tx;
 extern TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN EV */
@@ -171,6 +172,27 @@ void TIM1_UP_TIM10_IRQHandler(void)
   /* USER CODE BEGIN TIM1_UP_TIM10_IRQn 1 */
 
   /* USER CODE END TIM1_UP_TIM10_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream2 global interrupt.
+  */
+void DMA2_Stream2_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream2_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream2_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_spi1_tx);
+  /* USER CODE BEGIN DMA2_Stream2_IRQn 1 */
+
+  /*
+   * HAL_DMA_IRQHandler(&hdma_spi1_tx) 是 DMA2 Stream2 的中断分发入口：它确认完成/错误标志、清除硬件标志，
+   * 再调用 HAL 已登记的 SPI DMA 内部回调。对本项目而言，这条链最终会进入 bsp_lcd.c 的
+   * HAL_SPI_TxCpltCallback() 或 HAL_SPI_ErrorCallback()，由它们续传下一像素块，或释放 LCD CS 与 busy。
+   * 此 IRQ 在中断上下文执行，禁止在这里直接绘图、轮询等待或调用非 ISR 版本的 FreeRTOS API。
+   */
+
+  /* USER CODE END DMA2_Stream2_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

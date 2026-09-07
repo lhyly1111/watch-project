@@ -20,6 +20,7 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include "adc.h"
+#include "dma.h"
 #include "spi.h"
 #include "tim.h"
 #include "gpio.h"
@@ -65,7 +66,7 @@ volatile float battery_voltage;
  * 本次测试图案的像素存储区：96 x 60 个 uint16_t，每个元素存一个 RGB565 颜色，
  * 共占 96 x 60 x 2 = 11520 字节（约 11.25 KB）。
  * static 使数组位于全局数据区而非 main() 的栈；图案函数填充它后，
- * Lcd_WritePixels() 才能在阻塞发送期间持续读取其中的像素数据。
+ * 阻塞接口或 DMA 接口才能在各自整个传输期间持续读取其中的像素数据。
  */
 static uint16_t lcd_pixel_test_buffer[LCD_PIXEL_TEST_WIDTH * LCD_PIXEL_TEST_HEIGHT];
 /* USER CODE END PV */
@@ -148,10 +149,18 @@ int main(void)
 
   /* USER CODE BEGIN SysInit */
 
+  /*
+   * CubeMX 在下面的外设初始化序列中先调用 MX_DMA_Init()，再调用 MX_SPI1_Init()。
+   * MX_DMA_Init() 只开启 DMA2 时钟和 DMA2_Stream2 IRQ；SPI1 的发送 DMA 句柄、字节对齐和关联在
+   * spi.c 的 HAL_SPI_MspInit() 中建立。该顺序保证后续 Lcd_StartWritePixelsDma() 启动 SPI DMA 时，
+   * 硬件通道已经可用且完成中断能进入 BSP 回调。此说明放在 USER CODE 区，CubeMX 重新生成时会保留。
+   */
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_TIM3_Init();
   MX_ADC1_Init();
   MX_SPI1_Init();
@@ -161,14 +170,20 @@ int main(void)
   battery_voltage = Battery_ReadVoltageAverage();
   Lcd_Init();
   /*
-   * LCD 驱动 V1 的第二项实物测试：先清黑屏，再写入一块不对称像素图案。
-   * 这会验证 uint16_t 像素数组的字节序、行优先顺序和显示位置。
+   * LCD DMA 阶段的首项实物测试：黑色清屏仍使用 V1 阻塞基线，随后异步写入同一块不对称图案。
+   * 这样若图案异常，已实测通过的初始化、地址窗口、黑屏和颜色转换基线不需要重新怀疑；
+   * 这次只验证 DMA 字节搬运、DMA 中断回调、CS 持续选中时序和多分块连续发送。
    */
   Lcd_FillScreen(0x0000U);//全屏填充黑色
   Lcd_BuildPixelTestPattern();
-  if (!Lcd_WritePixels(LCD_PIXEL_TEST_X, LCD_PIXEL_TEST_Y,
-                       LCD_PIXEL_TEST_WIDTH, LCD_PIXEL_TEST_HEIGHT,
-                       lcd_pixel_test_buffer))
+  /*
+   * 此函数返回 true 只表示 DMA 的首个分块已启动，屏幕此刻可能还在发送剩余像素。
+   * lcd_pixel_test_buffer 是 static，直到 Lcd_IsDmaBusy() 变为 false 前都有效且不会被本程序改写，
+   * 因而可以安全作为 DMA 的源数据；后续 LVGL 会用同样的“完成前不能复用绘制缓冲区”规则。
+   */
+  if (!Lcd_StartWritePixelsDma(LCD_PIXEL_TEST_X, LCD_PIXEL_TEST_Y,
+                               LCD_PIXEL_TEST_WIDTH, LCD_PIXEL_TEST_HEIGHT,
+                               lcd_pixel_test_buffer))
   {
     Error_Handler();
   }

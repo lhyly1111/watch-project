@@ -25,6 +25,7 @@
 /* USER CODE END 0 */
 
 SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_tx;
 
 /* SPI1 init function */
 void MX_SPI1_Init(void)
@@ -83,7 +84,44 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef* spiHandle)
     GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
     HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
+    /* SPI1 DMA Init */
+    /* SPI1_TX Init */
+    hdma_spi1_tx.Instance = DMA2_Stream2;
+    hdma_spi1_tx.Init.Channel = DMA_CHANNEL_2;
+    hdma_spi1_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+    hdma_spi1_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+    hdma_spi1_tx.Init.MemInc = DMA_MINC_ENABLE;
+    hdma_spi1_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_spi1_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+    hdma_spi1_tx.Init.Mode = DMA_NORMAL;
+    hdma_spi1_tx.Init.Priority = DMA_PRIORITY_LOW;
+    hdma_spi1_tx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+    if (HAL_DMA_Init(&hdma_spi1_tx) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_LINKDMA(spiHandle,hdmatx,hdma_spi1_tx);
+
   /* USER CODE BEGIN SPI1_MspInit 1 */
+
+    /*
+     * 上方由 CubeMX 生成的 hdma_spi1_tx 是“SPI1 发送方向专用”的 DMA 状态对象；它由 HAL_SPI_Transmit_DMA()
+     * 读取，用来找到 DMA2 Stream2 的寄存器和完成回调，不能与未来的接收 DMA 或其它 SPI 共用。
+     *
+     * Instance=DMA2_Stream2、Channel=DMA_CHANNEL_2 是 CubeMX 对 STM32F411CEU6 当前 SPI1_TX 请求的实际分配。
+     * Direction=DMA_MEMORY_TO_PERIPH 表示字节从 RAM 的 lcd_dma_transfer_buffer 流向 SPI1 数据寄存器；
+     * PeriphInc=Disable 因为 SPI 数据寄存器地址固定；MemInc=Enable 才会按顺序读取图像缓冲区的下一个字节。
+     *
+     * 双方 DataAlignment 都是 Byte，必须与当前 SPI1 的 8-bit 数据帧和 BSP 中“高字节、低字节”的 RGB565
+     * 字节流一致。Mode=Normal 使一帧结束后 DMA 停止，不会循环重播旧图像；Priority=Low 是当前没有 DMA
+     * 竞争者时的保守选择；FIFOMode=Disable 使用直接模式，先验证正确性而非追求吞吐量。
+     *
+     * HAL_DMA_Init(&hdma_spi1_tx) 把这些字段写入 DMA 硬件；HAL_OK 才说明初始化完成，失败会进入
+     * Error_Handler() 并停止，防止 SPI 句柄带着不完整 DMA 配置继续工作。__HAL_LINKDMA(spiHandle, hdmatx,
+     * hdma_spi1_tx) 将 SPI1 句柄的 hdmatx 指针指向该对象；没有这个关联，HAL_SPI_Transmit_DMA() 不知道
+     * 应启动哪个 DMA stream，也无法把 DMA 完成事件转交给 HAL_SPI_TxCpltCallback()。
+     */
 
   /* USER CODE END SPI1_MspInit 1 */
   }
@@ -106,6 +144,8 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef* spiHandle)
     */
     HAL_GPIO_DeInit(GPIOB, GPIO_PIN_3|GPIO_PIN_5);
 
+    /* SPI1 DMA DeInit */
+    HAL_DMA_DeInit(spiHandle->hdmatx);
   /* USER CODE BEGIN SPI1_MspDeInit 1 */
 
   /* USER CODE END SPI1_MspDeInit 1 */

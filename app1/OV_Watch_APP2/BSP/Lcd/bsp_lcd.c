@@ -1,4 +1,4 @@
-    /* 最小 ST7789 显示 BSP：负责复位与 SPI 命令初始化，不包含 DMA 或 LVGL。 */
+    /* 最小 ST7789 显示 BSP：负责复位、SPI 命令、阻塞像素写入和 DMA 像素写入，不包含 LVGL。 */
     #include "bsp_lcd.h"
 
     #include <stdbool.h>
@@ -17,6 +17,34 @@
     #define LCD_Y_OFFSET 20U
     /* 每次 SPI 阻塞发送最多复用的像素数量；256 像素等于 512 字节，避免大栈缓冲区和单次超长传输。 */
     #define LCD_FILL_CHUNK_PIXELS 256U
+
+    /*
+     * lcd_dma_transfer_buffer 保存一个待 DMA 发送的高字节优先 RGB565 分块，容量为 256 像素/512 字节。
+     * 它必须是 static：HAL_SPI_Transmit_DMA() 返回后 DMA 仍会读取这个 RAM 区域，不能使用已离开作用域的栈数组。
+     * 仅 Lcd_StartNextDmaChunk() 写入，DMA 繁忙期间只能被 DMA 外设读取；一帧结束后才能被下一帧覆盖。
+     */
+    static uint8_t lcd_dma_transfer_buffer[LCD_FILL_CHUNK_PIXELS * 2U];
+    /*
+     * lcd_dma_busy 是 LCD DMA 事务的所有权标记。主程序通过 Lcd_IsDmaBusy() 读取它，
+     * DMA 完成/错误中断通过回调清除它；volatile 防止编译器把被中断异步修改的值缓存到寄存器。
+     * false 表示驱动可以接收一帧新像素；true 表示 CS 已被 DMA 事务占用，禁止启动第二帧。
+     */
+    static volatile bool lcd_dma_busy;
+    /*
+     * lcd_dma_failed 记录最近一次 DMA 事务是否异常结束。启动新事务时清零，错误回调或启动失败时置位；
+     * 主程序可在 lcd_dma_busy 变为 false 后读取它判断本帧是否成功。它同样由中断修改，故使用 volatile。
+     */
+    static volatile bool lcd_dma_failed;
+    /*
+     * lcd_dma_current_pixel 指向本帧尚未转换的第一个 uint16_t RGB565 像素。
+     * 启动函数从调用者 pixels 赋值；每发送一个分块前推进；DMA 完成或失败后清为空指针，表示本帧不再持有源数据。
+     */
+    static const uint16_t *lcd_dma_current_pixel;
+    /*
+     * lcd_dma_remaining_pixels 是当前帧还未复制进 DMA 字节缓冲区的像素数量，而不是字节数量。
+     * 它由启动函数设置为 width * height，并由每个 DMA 分块递减；uint32_t 覆盖整屏 67200 像素而不会溢出。
+     */
+    static uint32_t lcd_dma_remaining_pixels;
 
     /*
        command：要执行的单字节 ST7789 命令，例如 0x2A（列地址）或 0x29（开显示）。
@@ -154,6 +182,151 @@
                (x < LCD_WIDTH) && (y < LCD_HEIGHT) &&
                (width <= (LCD_WIDTH - x)) &&
                (height <= (LCD_HEIGHT - y));
+    }
+
+    /*
+     * failed 表示本帧结束原因：false 是全部像素已由 HAL 完成发送，true 是 DMA 未能启动或 SPI 报错。
+     * 该函数只能在 DMA 完成/错误回调或同步启动失败路径调用；它统一归还 CS、源缓冲区和 busy 所有权，
+     * 防止不同退出路径遗留 CS 低电平或永远 busy 的状态。
+     */
+    static void Lcd_FinishDmaTransfer(bool failed)
+    {
+        /* DMA 事务结束后拉高 CS，结束从 0x2C 开始的整段像素数据事务。 */
+        HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_SET);
+        /* 先保存本帧最终结果，供主程序在 Lcd_IsDmaBusy() 为 false 后查询。 */
+        lcd_dma_failed = failed;
+        /* 像素源已不再被 DMA 或驱动读取，清空指针可避免调试时误认为它仍被持有。 */
+        lcd_dma_current_pixel = NULL;
+        /* 剩余数量归零，保证下一帧不会继续上一帧的进度。 */
+        lcd_dma_remaining_pixels = 0U;
+        /* 最后清 busy，向主程序宣布 LCD 和 DMA 缓冲区已被释放。 */
+        lcd_dma_busy = false;
+    }
+
+    /*
+     * 准备并启动本帧的下一个 DMA 分块。调用者必须已经设置好地址窗口、CS=0、DC=1 且 lcd_dma_busy=true。
+     * 返回 true 表示 HAL 已接收 DMA 请求；返回 false 表示启动失败，调用者必须调用 Lcd_FinishDmaTransfer(true)。
+     * 此函数既由主程序启动首块，也由 SPI DMA 完成回调启动后续块，因此其中不能阻塞、不能使用 RTOS API。
+     */
+    static bool Lcd_StartNextDmaChunk(void)
+    {
+        /* pixel_count 是本轮复制/发送的像素数量，最大 256，以匹配 lcd_dma_transfer_buffer 的固定容量。 */
+        uint16_t pixel_count;
+
+        if (lcd_dma_remaining_pixels == 0U) {
+            return false;
+        }
+
+        if (lcd_dma_remaining_pixels > LCD_FILL_CHUNK_PIXELS) {
+            pixel_count = LCD_FILL_CHUNK_PIXELS;
+        } else {
+            pixel_count = (uint16_t)lcd_dma_remaining_pixels;
+        }
+
+        /*
+         * index 是当前 DMA 分块内的像素下标；每个 uint16_t RGB565 都拆为 ST7789 所需的高字节、低字节。
+         * 这里沿用 V1 已实物验证的转换，DMA 只改变字节如何搬到 SPI，不改变颜色格式或字节序。
+         */
+        for (uint16_t index = 0U; index < pixel_count; ++index) {
+            /* color 是源数组中当前 RGB565 像素，读取方是驱动，调用者在事务结束前不得改写它。 */
+            const uint16_t color = lcd_dma_current_pixel[index];
+
+            lcd_dma_transfer_buffer[index * 2U] = (uint8_t)(color >> 8U);
+            lcd_dma_transfer_buffer[index * 2U + 1U] = (uint8_t)color;
+        }
+
+        /*
+         * 在启动 DMA 前推进帧进度：若中断在 HAL_SPI_Transmit_DMA() 返回后立刻到来，回调可直接准备下一块。
+         * current_pixel 的单位是 uint16_t 元素，remaining_pixels 的单位是像素；两者每轮都减少 pixel_count。
+         */
+        lcd_dma_current_pixel += pixel_count;
+        lcd_dma_remaining_pixels -= pixel_count;
+
+        /*
+         * HAL_SPI_Transmit_DMA(句柄, 字节缓冲区, 字节数) 让 DMA2 把本块 RAM 数据写入 SPI1 数据寄存器。
+         * &hspi1 是 CubeMX 已连接 hdma_spi1_tx 的 SPI1 句柄；缓冲区是 static 且在事务结束前不可改写；
+         * pixel_count * 2U 是 RGB565 的字节数。HAL_OK 仅表示异步传输成功启动，真正结束由 HAL_SPI_TxCpltCallback() 报告。
+         */
+        return HAL_SPI_Transmit_DMA(&hspi1, lcd_dma_transfer_buffer,
+                                    (uint16_t)(pixel_count * 2U)) == HAL_OK;
+    }
+
+    bool Lcd_StartWritePixelsDma(uint16_t x, uint16_t y,
+                                 uint16_t width, uint16_t height,
+                                 const uint16_t *pixels)
+    {
+        if ((pixels == NULL) || !Lcd_IsRectValid(x, y, width, height) || lcd_dma_busy) {
+            return false;
+        }
+
+        /* 先锁定 DMA 所有权，保证从设置窗口到启动第一块期间没有第二个调用者插入事务。 */
+        lcd_dma_busy = true;
+        /* 新帧从“未失败”状态开始；只有启动失败或错误回调才会改为 true。 */
+        lcd_dma_failed = false;
+        /* 保存调用者数组首地址；它在整个异步事务中必须保持有效且内容不变。 */
+        lcd_dma_current_pixel = pixels;
+        /* width * height 是本帧总像素数，使用 uint32_t 防止未来更大窗口的乘法溢出。 */
+        lcd_dma_remaining_pixels = (uint32_t)width * height;
+
+        /* 仍复用 V1 已验证的 0x2A/0x2B/0x2C 地址窗口与 Y 偏移逻辑。 */
+        Lcd_SetAddressWindow(x, y, x + width - 1U, y + height - 1U);
+        /* 将 CS 保持为低，确保所有 DMA 分块属于同一次 0x2C 像素数据事务。 */
+        HAL_GPIO_WritePin(LCD_CS_GPIO_Port, LCD_CS_Pin, GPIO_PIN_RESET);
+        /* DC=1 让 ST7789 把 DMA 字节解释为 RGB565 像素，而不是命令或地址参数。 */
+        HAL_GPIO_WritePin(LCD_DC_GPIO_Port, LCD_DC_Pin, GPIO_PIN_SET);
+
+        if (!Lcd_StartNextDmaChunk()) {
+            /* HAL 拒绝首块时不会有完成中断，必须同步清理片选和所有权。 */
+            Lcd_FinishDmaTransfer(true);
+            return false;
+        }
+
+        return true;
+    }
+
+    bool Lcd_IsDmaBusy(void)
+    {
+        /* 读取 volatile 状态，得到主程序此刻是否仍必须保留 DMA 源数据。 */
+        return lcd_dma_busy;
+    }
+
+    bool Lcd_DmaTransferFailed(void)
+    {
+        /* 读取最近一帧的 volatile 结果；应在 Lcd_IsDmaBusy() 为 false 后解释它。 */
+        return lcd_dma_failed;
+    }
+
+    /*
+     * HAL 在 hspi 指向的 SPI DMA 发送完成后调用此回调，调用上下文是 DMA2_Stream2 中断而不是主循环。
+     * 只处理 APP2 的 hspi1，避免未来其他 SPI 外设触发回调时误释放 LCD 的 CS 或状态。
+     */
+    void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+    {
+        if ((hspi != &hspi1) || !lcd_dma_busy) {
+            return;
+        }
+
+        if (lcd_dma_remaining_pixels > 0U) {
+            /* 当前块完成但同一帧仍有像素；立刻准备下一块，CS 和 DC 保持原样。 */
+            if (!Lcd_StartNextDmaChunk()) {
+                /* 后续块启动失败时没有可靠的完成通知，统一按错误路径归还资源。 */
+                Lcd_FinishDmaTransfer(true);
+            }
+        } else {
+            /* 最后一块已由 HAL 确认完成，至此再结束 CS 事务并释放调用者源数据。 */
+            Lcd_FinishDmaTransfer(false);
+        }
+    }
+
+    /*
+     * HAL 在 SPI/DMA 传输发生硬件错误时调用此回调，仍运行在中断上下文。
+     * 当前阶段不在此调用 Error_Handler()：先释放 CS 和 busy，保留状态给调试器/上层查询，避免永远占住 LCD。
+     */
+    void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+    {
+        if ((hspi == &hspi1) && lcd_dma_busy) {
+            Lcd_FinishDmaTransfer(true);
+        }
     }
 
     void Lcd_FillRect(uint16_t x, uint16_t y,

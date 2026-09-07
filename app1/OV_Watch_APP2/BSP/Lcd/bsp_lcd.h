@@ -26,6 +26,22 @@ bool Lcd_WritePixels(uint16_t x, uint16_t y,
                      uint16_t width, uint16_t height,
                      const uint16_t *pixels);
 
+/*
+ * 异步启动一帧 RGB565 像素块的 DMA 写入，坐标与 pixels 的布局规则和 Lcd_WritePixels() 相同。
+ * true 仅表示参数合法、LCD 空闲且首个 DMA 分块已被 SPI 接受；返回时屏幕可能还在传输，
+ * 因此调用者在 Lcd_IsDmaBusy() 返回 false 前不得修改或释放 pixels 指向的数据。
+ * 本接口是 LCD DMA 阶段的诊断入口；后续 LVGL 阶段会在此异步完成语义上建立 flush_cb。
+ */
+bool Lcd_StartWritePixelsDma(uint16_t x, uint16_t y,
+                             uint16_t width, uint16_t height,
+                             const uint16_t *pixels);
+
+/* 返回 true 表示 SPI1 的 LCD DMA 事务尚未完成，DMA 缓冲区与调用者像素数据仍被驱动占用。 */
+bool Lcd_IsDmaBusy(void);
+
+/* 返回最近一次 DMA 事务是否因启动失败或 HAL SPI 错误结束；下一次成功启动会清除此状态。 */
+bool Lcd_DmaTransferFailed(void);
+
 /* 全屏填充是 Lcd_FillRect() 的便捷封装。 */
 void Lcd_FillScreen(uint16_t color);
 
