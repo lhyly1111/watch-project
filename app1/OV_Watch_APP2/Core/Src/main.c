@@ -28,6 +28,7 @@
 /* USER CODE BEGIN Includes */
 #include "bsp_backlight.h"
 #include "bsp_battery.h"
+#include "bsp_lcd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -100,6 +101,15 @@ int main(void)
   Backlight_Init();
   battery_raw = Battery_ReadRaw();
   battery_voltage = Battery_ReadVoltageAverage();
+  Lcd_Init();
+  /*
+   * LCD 驱动 V1 的第一项实物测试：四个矩形恰好覆盖 240 x 280 全屏。
+   * 这会同时验证 x/y 坐标、宽高计算、窗口切换和 RGB565 颜色传输。
+   */
+  Lcd_FillRect(0U,   0U,   120U, 140U, 0xF800U);  // 左上：红
+  Lcd_FillRect(120U, 0U,   120U, 140U, 0x07E0U);  // 右上：绿
+  Lcd_FillRect(0U,   140U, 120U, 140U, 0x001FU);  // 左下：蓝
+  Lcd_FillRect(120U, 140U, 120U, 140U, 0xFFFFU);  // 右下：白
   /* USER CODE END 2 */
 
   /* Init scheduler */
