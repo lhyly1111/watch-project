@@ -13,6 +13,10 @@
 
 When an APP2 hardware feature compiles and downloads but does not behave on the board, first confirm execution with a breakpoint or debugger state. Then compare the relevant APP2 CubeMX `.ioc`, generated `main.h`/GPIO/SPI configuration, and the immutable V2.4.3 reference driver. List the concrete differences and change only one hardware or protocol variable per test. Treat successful board behavior as the final evidence, and record the configuration that produced it.
 
+## APP2 development roadmap
+
+The high-level development roadmap is `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\开发路线\OV Watch APP2 开发目录.md`. Keep it high-level. Before starting a roadmap stage, create or extend that stage's linked Obsidian note with the detailed implementation and learning plan; after completion, update the roadmap status, verification evidence, and the next stage. Do not advance to a dependent stage until its stated acceptance condition is met.
+
 ## Daily Obsidian learning notes
 
 The active implementation is `app1/OV_Watch_APP2`. When the user asks for a daily OV-Watch learning summary, create or update a dated Markdown note in `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\每日总结` and update the relevant relation chain in `C:\Users\Administrator\Desktop\Obsidian\OV_Watch\关系链`. Each note must distinguish verified results, unresolved risks, and the next action, and should link to its relation chain and relevant protocol notes.

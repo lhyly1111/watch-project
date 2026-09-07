@@ -17,8 +17,8 @@
 | TIM3 / PB0 背光 | `BSP/Backlight` 已实现 | 已在实物板验证亮度变化 |
 | ADC1 / PA1 电池采样 | `BSP/Battery` 已实现单次和 8 次平均读取 | 代码和调试器已验证，等待万用表校准 |
 | PA4 / PA5 按键 | `BSP/Key` 轮询接口已实现 | 已编译；当前实物板没有对应实体按键 |
-| SPI1 显示接口 | PB3 SCK、PB5 MOSI，Mode 3，12.5 MHz | 已由纯红首屏实测 |
-| LCD 控制与首屏 | PB7 RST、PB8 CS、PB9 DC；初始化、地址窗口与 RGB565 填屏已接入 `main.c` | 纯红已在实物板验证 |
+| SPI1 显示接口 | PB3 SCK、PB5 MOSI，Mode 3，12.5 MHz | 已由红、绿、蓝、白全屏实测 |
+| LCD 控制与首屏 | PB7 RST、PB8 CS、PB9 DC；初始化、地址窗口与 RGB565 填屏已接入 `main.c` | 红、绿、蓝、白全屏已在实物板验证 |
 
 ## 硬件调试原则
 
