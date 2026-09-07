@@ -56,7 +56,12 @@
 /* USER CODE BEGIN PV */
 volatile uint16_t battery_raw;
 volatile float battery_voltage;
-/* 静态数组位于全局数据区，不占用 main() 的栈空间。 */
+/*
+ * 本次测试图案的像素存储区：96 x 60 个 uint16_t，每个元素存一个 RGB565 颜色，
+ * 共占 96 x 60 x 2 = 11520 字节（约 11.25 KB）。
+ * static 使数组位于全局数据区而非 main() 的栈；图案函数填充它后，
+ * Lcd_WritePixels() 才能在阻塞发送期间持续读取其中的像素数据。
+ */
 static uint16_t lcd_pixel_test_buffer[LCD_PIXEL_TEST_WIDTH * LCD_PIXEL_TEST_HEIGHT];
 /* USER CODE END PV */
 
@@ -147,7 +152,7 @@ int main(void)
    * LCD 驱动 V1 的第二项实物测试：先清黑屏，再写入一块不对称像素图案。
    * 这会验证 uint16_t 像素数组的字节序、行优先顺序和显示位置。
    */
-  Lcd_FillScreen(0x0000U);
+  Lcd_FillScreen(0x0000U);//全屏填充黑色
   Lcd_BuildPixelTestPattern();
   if (!Lcd_WritePixels(LCD_PIXEL_TEST_X, LCD_PIXEL_TEST_Y,
                        LCD_PIXEL_TEST_WIDTH, LCD_PIXEL_TEST_HEIGHT,
