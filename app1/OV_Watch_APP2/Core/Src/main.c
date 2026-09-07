@@ -47,6 +47,12 @@
 #define LCD_PIXEL_TEST_X       24U
 /* 测试图案左上角的逻辑行坐标；40 让图案离屏幕上边缘留出黑色背景便于定位。 */
 #define LCD_PIXEL_TEST_Y       40U
+/*
+ * 本次 DMA 连续刷新测试要提交的完整图案帧数；120 帧在 12.5 MHz SPI 下约持续 0.9 秒。
+ * 数值足以重复触发 DMA 回调链，却不会让启动阶段等待过久；它只由 Lcd_RunDmaRefreshTest() 读取，
+ * 后续接入 LVGL 后会删除这项诊断常量，改由真实页面刷新频率决定提交次数。
+ */
+#define LCD_DMA_TEST_FRAME_COUNT 120U
 
 /* USER CODE END PD */
 
@@ -69,6 +75,18 @@ volatile float battery_voltage;
  * 阻塞接口或 DMA 接口才能在各自整个传输期间持续读取其中的像素数据。
  */
 static uint16_t lcd_pixel_test_buffer[LCD_PIXEL_TEST_WIDTH * LCD_PIXEL_TEST_HEIGHT];
+/*
+ * lcd_dma_test_completed_frames 记录已被 DMA 完整发送且未报告错误的图案帧数量，范围为 0 到 120。
+ * 它由启动阶段的 Lcd_RunDmaRefreshTest() 写入，调试器读取；volatile 让编译器保留每次递增，
+ * 便于验证连续刷新实际完成，而不是把这项仅供诊断的计数优化掉。LVGL 阶段会以刷新统计替代它。
+ */
+static volatile uint32_t lcd_dma_test_completed_frames;
+/*
+ * lcd_dma_test_cpu_work_counter 记录上一帧 DMA 仍 busy 时，CPU 执行了多少次最小非显示工作。
+ * 它由主程序在轮询 busy 期间递增、调试器读取；volatile 使观察值可靠。它不是性能基准也不是业务状态，
+ * 只用于证明 CPU 没有像阻塞 HAL_SPI_Transmit() 那样一直等待 SPI；后续会由 RTOS/LVGL 实际工作替代。
+ */
+static volatile uint32_t lcd_dma_test_cpu_work_counter;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -118,6 +136,75 @@ static void Lcd_BuildPixelTestPattern(void)
 
       /* C 数组按行优先存放：先写完一行，再进入下一行。 */
       lcd_pixel_test_buffer[y * LCD_PIXEL_TEST_WIDTH + x] = color;
+    }
+  }
+}
+
+/*
+ * 连续提交同一块已验证图案，专门验证 DMA 的 busy 所有权状态机。
+ * 每帧必须先由 Lcd_StartWritePixelsDma() 异步启动，再等 Lcd_IsDmaBusy() 变为 false；
+ * 只有 HAL 的最后完成回调已经释放 DMA 缓冲区和像素源数组后，才允许提交下一帧。
+ * 测试仍发生在 osKernelStart() 前，以隔离 DMA 行为；此时 cpu_work_counter 只是最小工作证据，
+ * 不是正式的 FreeRTOS 并发设计。任何启动或传输失败都调用 Error_Handler() 停止，避免静默通过错误画面。
+ */
+static void Lcd_RunDmaRefreshTest(void)
+{
+  /* 每次启动测试前清零完成帧数；写入者只有本函数，调试器可在启动后验证最终值为 120。 */
+  lcd_dma_test_completed_frames = 0U;
+  /* 清零 CPU 工作计数器；只要 DMA 传输期间主循环仍能执行，它最终必须大于零。 */
+  lcd_dma_test_cpu_work_counter = 0U;
+
+  /*
+   * 启动第一帧 DMA。true 只表示首个分块已交给 DMA，不能据此认为整帧完成；
+   * lcd_pixel_test_buffer 是 static，在本函数整个运行期间有效，满足驱动对源数组生命周期的要求。
+   */
+  if (!Lcd_StartWritePixelsDma(LCD_PIXEL_TEST_X, LCD_PIXEL_TEST_Y,
+                               LCD_PIXEL_TEST_WIDTH, LCD_PIXEL_TEST_HEIGHT,
+                               lcd_pixel_test_buffer))
+  {
+    /* Error_Handler() 会停止程序；首帧启动失败时不允许带着未知 DMA 状态启动 FreeRTOS。 */
+    Error_Handler();
+  }
+
+  /*
+   * while 的退出条件是“120 帧均已完成”。循环变量使用全局诊断计数，便于在调试器中跨函数观察。
+   * 在 DMA busy 期间绝不提交第二帧；这正是本步骤要验证的缓冲区所有权规则。
+   */
+  while (lcd_dma_test_completed_frames < LCD_DMA_TEST_FRAME_COUNT)
+  {
+    if (Lcd_IsDmaBusy())
+    {
+      /*
+       * DMA 正在把当前 256 像素分块送往 SPI1；CPU 在这里执行一个无副作用的最小诊断工作。
+       * 递增本身不能衡量性能，但能证明 CPU 没有被阻塞式 SPI 调用占住；不能在这里修改图案数组。
+       */
+      ++lcd_dma_test_cpu_work_counter;
+      continue;
+    }
+
+    /* busy=false 后再检查错误结果；若错误回调曾释放事务，不能把这帧误记为成功。 */
+    if (Lcd_DmaTransferFailed())
+    {
+      /* DMA/SPI 传输异常时停止，保留调试器中的 failed/busy 状态供排查。 */
+      Error_Handler();
+    }
+
+    /* 当前帧已由最后一块完成回调确认结束，记录成功帧数；范围最多到 LCD_DMA_TEST_FRAME_COUNT。 */
+    ++lcd_dma_test_completed_frames;
+
+    if (lcd_dma_test_completed_frames < LCD_DMA_TEST_FRAME_COUNT)
+    {
+      /*
+       * 只有上一帧 busy 已清除才提交下一帧，因此 DMA 静态字节缓冲区不会被提前覆盖。
+       * 每帧重复同一图案，保证屏幕现象稳定；本步验证的是连续事务时序，而不是动画绘制。
+       */
+      if (!Lcd_StartWritePixelsDma(LCD_PIXEL_TEST_X, LCD_PIXEL_TEST_Y,
+                                   LCD_PIXEL_TEST_WIDTH, LCD_PIXEL_TEST_HEIGHT,
+                                   lcd_pixel_test_buffer))
+      {
+        /* 新一帧启动被 HAL 或驱动拒绝时停止，不能把“少发一帧”伪装成测试通过。 */
+        Error_Handler();
+      }
     }
   }
 }
@@ -176,17 +263,8 @@ int main(void)
    */
   Lcd_FillScreen(0x0000U);//全屏填充黑色
   Lcd_BuildPixelTestPattern();
-  /*
-   * 此函数返回 true 只表示 DMA 的首个分块已启动，屏幕此刻可能还在发送剩余像素。
-   * lcd_pixel_test_buffer 是 static，直到 Lcd_IsDmaBusy() 变为 false 前都有效且不会被本程序改写，
-   * 因而可以安全作为 DMA 的源数据；后续 LVGL 会用同样的“完成前不能复用绘制缓冲区”规则。
-   */
-  if (!Lcd_StartWritePixelsDma(LCD_PIXEL_TEST_X, LCD_PIXEL_TEST_Y,
-                               LCD_PIXEL_TEST_WIDTH, LCD_PIXEL_TEST_HEIGHT,
-                               lcd_pixel_test_buffer))
-  {
-    Error_Handler();
-  }
+  /* 连续刷新测试内部以 busy 状态保护 120 次异步提交；返回前最后一帧已完成或已进入 Error_Handler。 */
+  Lcd_RunDmaRefreshTest();
   /* USER CODE END 2 */
 
   /* Init scheduler */
